@@ -1,0 +1,28 @@
+# ─── 의존성 ─────────────────────────────
+node_modules/
+
+# ─── 환경변수 (절대 커밋 금지) ─────────
+.env
+.env.local
+.env.*.local
+
+# ─── Netlify 로컬 빌드 캐시 ─────────────
+.netlify/
+
+# ─── Claude Code / 에디터 로컬 설정 ───
+.claude/
+.vscode/
+.idea/
+
+# ─── OS 파일 ────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ─── 로그 ───────────────────────────────
+*.log
+npm-debug.log*
+
+# ─── 빌드 산출물 (혹시 모를 캐시) ──────
+dist/
+build/

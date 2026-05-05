@@ -1,0 +1,20 @@
+[build]
+  publish = "."
+
+[build.environment]
+  NODE_VERSION = "18"
+
+[functions]
+  node_bundler = "esbuild"
+  directory = "netlify/functions"
+
+# Claude API 응답 시간을 고려해 함수 타임아웃 늘림 (Pro 플랜 한정 26초까지 가능)
+[functions."brief"]
+  timeout = 26
+
+# /api/brief 로도 함수 호출 가능하게 리다이렉트 (편의용)
+[[redirects]]
+  from = "/api/brief"
+  to = "/.netlify/functions/brief"
+  status = 200
+  force = true
