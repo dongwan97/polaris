@@ -232,6 +232,18 @@
         display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
         overflow: hidden;
       }
+      /* Category badge — 카드 우측 상단 */
+      .news-card .nc-cat {
+        margin-left: auto;
+        font-size: 9.5px; letter-spacing: 0.08em;
+        padding: 2px 8px; border-radius: 9px;
+        white-space: nowrap;
+        border: 1px solid;
+      }
+      .news-card .nc-cat.cat-popup    { color: #ff8a9a; border-color: rgba(255,90,122,0.35);  background: rgba(255,90,122,0.08); }
+      .news-card .nc-cat.cat-campaign { color: #a8b4ff; border-color: rgba(168,180,255,0.35); background: rgba(168,180,255,0.08); }
+      .news-card .nc-cat.cat-card     { color: #5ec8ff; border-color: rgba(94,200,255,0.35);  background: rgba(94,200,255,0.08); }
+      .news-card .nc-cat.cat-trend    { color: #f0d78c; border-color: rgba(240,215,140,0.35); background: rgba(240,215,140,0.08); }
       .news-card:hover .nc-title { color: #fff; }
       .news-loading {
         grid-column: 1 / -1; text-align: center; padding: 30px;
@@ -285,28 +297,28 @@
           <div class="value"><span class="skeleton"></span></div>
           <div class="change">&nbsp;</div>
           <div class="avg"><span>전일 종가</span><strong id="avg-KOSPI">—</strong></div>
-          <div class="source"><span>Stooq</span><span class="badge" id="badge-KOSPI">…</span></div>
+          <div class="source"><span>Yahoo Finance</span><span class="badge" id="badge-KOSPI">…</span></div>
         </div>
         <div class="card loading" data-key="KOSDAQ">
           <div class="label"><span>KOSDAQ</span><span class="unit">코스닥</span></div>
           <div class="value"><span class="skeleton"></span></div>
           <div class="change">&nbsp;</div>
           <div class="avg"><span>전일 종가</span><strong id="avg-KOSDAQ">—</strong></div>
-          <div class="source"><span>Stooq</span><span class="badge" id="badge-KOSDAQ">…</span></div>
+          <div class="source"><span>Yahoo Finance</span><span class="badge" id="badge-KOSDAQ">…</span></div>
         </div>
         <div class="card loading" data-key="NASDAQ">
           <div class="label"><span>NASDAQ</span><span class="unit">나스닥</span></div>
           <div class="value"><span class="skeleton"></span></div>
           <div class="change">&nbsp;</div>
           <div class="avg"><span>전일 종가</span><strong id="avg-NASDAQ">—</strong></div>
-          <div class="source"><span>Stooq</span><span class="badge" id="badge-NASDAQ">…</span></div>
+          <div class="source"><span>Yahoo Finance</span><span class="badge" id="badge-NASDAQ">…</span></div>
         </div>
         <div class="card loading" data-key="SP500">
           <div class="label"><span>S&amp;P 500</span><span class="unit">미국 대형주</span></div>
           <div class="value"><span class="skeleton"></span></div>
           <div class="change">&nbsp;</div>
           <div class="avg"><span>전일 종가</span><strong id="avg-SP500">—</strong></div>
-          <div class="source"><span>Stooq</span><span class="badge" id="badge-SP500">…</span></div>
+          <div class="source"><span>Yahoo Finance</span><span class="badge" id="badge-SP500">…</span></div>
         </div>
       </div>
 
@@ -520,7 +532,7 @@
       })();
 
       /* ===== 캐시 버전 — 변경 시 모든 polaris_* 키 자동 삭제 ===== */
-      const CACHE_VERSION = "v8";
+      const CACHE_VERSION = "v9";
       (function clearStaleCache() {
         try {
           if (localStorage.getItem("polaris__version") !== CACHE_VERSION) {
@@ -775,45 +787,60 @@
 
       /* ============================================================
        * 4b) Stocks — KOSPI / KOSDAQ / NASDAQ / S&P 500 (1시간 캐시)
-       *      Stooq CSV API · API 키 불필요, 무료
+       *      Yahoo Finance Chart API · 자체 프록시 경유 → production 안정
+       *      Stooq fallback (Yahoo 실패 시)
        * ============================================================ */
       async function fetchStocks() {
         const STOCKS = [
-          { key: "KOSPI",  symbol: "^kospi"  },
-          { key: "KOSDAQ", symbol: "^kosdaq" },
-          { key: "NASDAQ", symbol: "^ndq"    },  // NASDAQ Composite on Stooq
-          { key: "SP500",  symbol: "^spx"    },  // S&P 500 on Stooq
+          { key: "KOSPI",  yahoo: "^KS11",  stooq: "^kospi"  },
+          { key: "KOSDAQ", yahoo: "^KQ11",  stooq: "^kosdaq" },
+          { key: "NASDAQ", yahoo: "^IXIC",  stooq: "^ndq"    },
+          { key: "SP500",  yahoo: "^GSPC",  stooq: "^spx"    },
         ];
-
-        // 최근 14일치 일봉 → 마지막 2개 종가로 전일 대비 계산
-        const today = new Date();
-        const start = new Date(today.getTime() - 14 * 86400000);
-        const ymd   = d => d.getFullYear() + String(d.getMonth()+1).padStart(2,"0") + String(d.getDate()).padStart(2,"0");
-        const d1    = ymd(start);
-        const d2    = ymd(today);
-
         const fmt = v => v.toLocaleString("ko-KR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-        await Promise.allSettled(STOCKS.map(async ({ key, symbol }) => {
+        // Yahoo Finance 시도
+        async function fetchYahoo(ticker) {
+          const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=5d`;
+          const data = await safeFetch(url, { forceProxy: true });
+          const result = data?.chart?.result?.[0];
+          if (!result) throw new Error("no chart data");
+          const meta   = result.meta || {};
+          const closes = (result.indicators?.quote?.[0]?.close || []).filter(v => v != null);
+          const current = typeof meta.regularMarketPrice === "number" ? meta.regularMarketPrice : closes[closes.length - 1];
+          const prev    = typeof meta.chartPreviousClose  === "number" ? meta.chartPreviousClose  : closes[closes.length - 2];
+          if (typeof current !== "number" || typeof prev !== "number") throw new Error("invalid prices");
+          return { current, prev };
+        }
+
+        // Stooq fallback (CSV)
+        async function fetchStooq(symbol) {
+          const today = new Date();
+          const start = new Date(today.getTime() - 14 * 86400000);
+          const ymd   = d => d.getFullYear() + String(d.getMonth()+1).padStart(2,"0") + String(d.getDate()).padStart(2,"0");
+          const url   = `https://stooq.com/q/d/l/?s=${encodeURIComponent(symbol)}&d1=${ymd(start)}&d2=${ymd(today)}&i=d`;
+          const csv   = await safeFetch(url, { forceProxy: true, responseType: "text" });
+          if (!csv || typeof csv !== "string" || csv.length < 50) throw new Error("empty csv");
+          const rows = csv.trim().split(/\r?\n/).slice(1)
+            .map(l => parseFloat(l.split(",")[4]))
+            .filter(v => !isNaN(v));
+          if (rows.length < 2) throw new Error("insufficient close data");
+          return { current: rows[rows.length - 1], prev: rows[rows.length - 2] };
+        }
+
+        await Promise.allSettled(STOCKS.map(async ({ key, yahoo, stooq }) => {
           try {
-            const csv = await cachedFetch("stock_" + key, CACHE.stock, () => {
-              const url = `https://stooq.com/q/d/l/?s=${encodeURIComponent(symbol)}&d1=${d1}&d2=${d2}&i=d`;
-              return safeFetch(url, { forceProxy: true, responseType: "text" });
+            const { current, prev, source } = await cachedFetch("stock_" + key, CACHE.stock, async () => {
+              try {
+                const r = await fetchYahoo(yahoo);
+                return { ...r, source: "yahoo" };
+              } catch (e1) {
+                console.warn(`[Polaris] Yahoo 실패 (${key}) → Stooq 폴백:`, e1.message);
+                const r = await fetchStooq(stooq);
+                return { ...r, source: "stooq" };
+              }
             });
 
-            // CSV 파싱: "Date,Open,High,Low,Close,Volume\n..."
-            if (!csv || typeof csv !== "string" || csv.length < 50) throw new Error("empty csv");
-            const lines = csv.trim().split(/\r?\n/);
-            if (lines.length < 3) throw new Error("not enough rows");
-            const rows = lines.slice(1).map(line => {
-              const parts = line.split(",");
-              return { date: parts[0], close: parseFloat(parts[4]) };
-            }).filter(r => !isNaN(r.close));
-
-            if (rows.length < 2) throw new Error("insufficient close data");
-
-            const current = rows[rows.length - 1].close;
-            const prev    = rows[rows.length - 2].close;
             const changeAbs = current - prev;
             const changePct = (changeAbs / prev) * 100;
 
@@ -825,7 +852,7 @@
             });
             setBadge(key, "live");
             const badge = document.getElementById("badge-" + key);
-            if (badge) badge.textContent = "1H 갱신";
+            if (badge) badge.textContent = source === "stooq" ? "Stooq · 1H" : "1H 갱신";
             state[key] = current;
           } catch (e) {
             console.error(`주가 ${key} 오류:`, e);
@@ -1253,13 +1280,13 @@
             }
             dedup.sort((a, b) => new Date(b.pubDate) - new Date(a.pubDate));
 
-            // 다양성 확보: 카테고리 4개 × 최대 3건 → 상위 10건만 노출
+            // 다양성 확보: 카테고리 4개 × 최대 5건 → 상위 20건 노출
             const perCat = {};
             const balanced = [];
             for (const it of dedup) {
               perCat[it.query] = (perCat[it.query] || 0) + 1;
-              if (perCat[it.query] <= 3) balanced.push(it);
-              if (balanced.length >= 10) break;
+              if (perCat[it.query] <= 5) balanced.push(it);
+              if (balanced.length >= 20) break;
             }
             return balanced;
           });
@@ -1270,6 +1297,14 @@
           if (grid) grid.innerHTML = `<div class="news-error">뉴스를 불러오지 못했습니다 (${e.message})</div>`;
         }
       }
+
+      // 카테고리 라벨·색상 매핑 (query 첫 키워드 기준)
+      const NEWS_CATEGORIES = {
+        "팝업스토어":    { label: "팝업·콜라보",  cls: "cat-popup"    },
+        "마케팅 캠페인": { label: "캠페인·광고",  cls: "cat-campaign" },
+        "카드사 혜택":   { label: "카드·멤버십",  cls: "cat-card"     },
+        "MZ세대":        { label: "트렌드·리테일", cls: "cat-trend"   },
+      };
 
       function renderNews(items) {
         const grid = document.getElementById("news-grid");
@@ -1293,15 +1328,19 @@
           "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
         }[c]));
 
-        grid.innerHTML = items.map(it => `
-          <a class="news-card" href="${escape(it.link)}" target="_blank" rel="noopener noreferrer">
-            <div class="nc-meta">
-              <span class="nc-source">${escape(it.source || "출처 미상")}</span>
-              <span class="nc-date">${fmtDate(it.pubDate)}</span>
-            </div>
-            <div class="nc-title">${escape(it.title)}</div>
-          </a>
-        `).join("");
+        grid.innerHTML = items.map(it => {
+          const cat = NEWS_CATEGORIES[it.query] || { label: "기타", cls: "cat-trend" };
+          return `
+            <a class="news-card" href="${escape(it.link)}" target="_blank" rel="noopener noreferrer">
+              <div class="nc-meta">
+                <span class="nc-source">${escape(it.source || "출처 미상")}</span>
+                <span class="nc-date">${fmtDate(it.pubDate)}</span>
+                <span class="nc-cat ${cat.cls}">${cat.label}</span>
+              </div>
+              <div class="nc-title">${escape(it.title)}</div>
+            </a>
+          `;
+        }).join("");
       }
 
       /* ============================================================
